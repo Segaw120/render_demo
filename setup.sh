@@ -1,5 +1,15 @@
 #!/bin/bash
 
+# Install system dependencies (for Ubuntu/Debian)
+if [ -f /etc/debian_version ]; then
+    echo "Installing system dependencies..."
+    sudo apt-get update
+    sudo apt-get install -y \
+        python3-dev \
+        build-essential \
+        libffi-dev
+fi
+
 # Create virtual environment
 python -m venv venv
 source venv/bin/activate

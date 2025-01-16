@@ -18,6 +18,7 @@ stub = modal.Stub("article-analysis")
 # Update image to include the specific model requirements
 image = (
     modal.Image.debian_slim()
+    .apt_install(["python3-dev", "build-essential", "libffi-dev"])
     .pip_install(
         "redis",
         "transformers>=4.34.0",
