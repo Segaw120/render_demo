@@ -13,7 +13,7 @@ import asyncio
 
 logger = logging.getLogger(__name__)
 
-stub = modal.Stub("article-analysis")
+app = modal.App("article-analysis")
 
 # Update image to include the specific model requirements
 image = (
@@ -29,7 +29,7 @@ image = (
     )
 )
 
-@stub.function(
+@app.function(
     image=image,
     gpu=ModalConfig.gpu_config,
     container_idle_timeout=ModalConfig.container_idle_timeout,
@@ -119,7 +119,7 @@ Analysis:"""
     logger.info(f"Batch analysis completed in {total_time:.2f} seconds")
     return analyses
 
-@stub.function(image=image)
+@app.function(image=image)
 async def analysis_worker(redis_config: RedisConfig):
     """
     Worker that listens for new articles and processes them in batches
