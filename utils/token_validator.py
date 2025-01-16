@@ -12,10 +12,11 @@ class TokenValidator:
             return False
             
         # Modal token format validation
-        token_pattern = r'^[a-zA-Z0-9_-]+$'
+        token_id_pattern = r'^ak-[a-zA-Z0-9]{16}$'
+        token_secret_pattern = r'^as-[a-zA-Z0-9]{16}$'
         return (
-            bool(re.match(token_pattern, token_id)) and
-            bool(re.match(token_pattern, token_secret))
+            bool(re.match(token_id_pattern, token_id)) and
+            bool(re.match(token_secret_pattern, token_secret))
         )
     
     @staticmethod

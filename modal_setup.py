@@ -5,6 +5,11 @@ from utils.token_validator import TokenValidator
 def setup_modal():
     """
     Set up Modal authentication and configuration
+    
+    Token format:
+    - MODAL_TOKEN_ID: starts with 'ak-' followed by 16 alphanumeric characters
+    - MODAL_TOKEN_SECRET: starts with 'as-' followed by 16 alphanumeric characters
+    
     Returns True if successful, False otherwise
     """
     try:
@@ -13,7 +18,11 @@ def setup_modal():
             env.MODAL_TOKEN_ID,
             env.MODAL_TOKEN_SECRET
         ):
-            raise ValueError("Invalid Modal token format")
+            raise ValueError(
+                "Invalid Modal token format. Expected format:\n"
+                "TOKEN_ID: ak-XXXXXXXXXXXXXXXX\n"
+                "TOKEN_SECRET: as-XXXXXXXXXXXXXXXX"
+            )
 
         # Initialize Modal client
         modal.setup(
