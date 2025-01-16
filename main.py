@@ -2,8 +2,13 @@ import asyncio
 from config import RedisConfig, FeedConfig, ModalConfig
 from feed_poller import RSSPoller
 from modal_analysis import analysis_worker
+from utils.logging_config import setup_logging
+from env_config import env
 
 async def main():
+    # Setup logging
+    setup_logging(env.ENV)
+    
     # Initialize services
     redis_config = RedisConfig()
     feed_config = FeedConfig()
