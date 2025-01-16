@@ -1,29 +1,45 @@
-import os
-from dataclasses import dataclass
-from dotenv import load_dotenv
+import redis
+from datetime import datetime, timedelta
+from config import RedisConfig
+import logging
 
-# Load environment variables from .env file
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-@dataclass
-class Environment:
-    """Environment configuration"""
-    # Environment type
-    ENV: str = os.getenv("ENV", "development")
+class HealthCheck:
+    def __init__(self, redis_config: RedisConfig):
+        self.redis_client = redis.Redis(
+            host=redis_config.host,
+            port=redis_config.port,
+            password=redis_config.password,
+            db=redis_config.db,
+            decode_responses=True
+        )
     
-    # Redis configuration
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "2025")
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
+    async def check_redis_connection(self) -> bool:
+        try:
+            return self.redis_client.ping()
+        except Exception as e:
+            logger.error(f"Redis connection error: {e}")
+            return False
     
-    # Modal configuration
-    MODAL_TOKEN_ID: str = os.getenv("MODAL_TOKEN_ID", "")
-    MODAL_TOKEN_SECRET: str = os.getenv("MODAL_TOKEN_SECRET", "")
+    async def check_feed_polling(self) -> bool:
+        try:
+            last_poll = self.redis_client.get("last_poll_timestamp")
+            if not last_poll:
+                return False
+            
+            last_poll_time = datetime.fromisoformat(last_poll)
+            return datetime.now() - last_poll_time < timedelta(minutes=5)
+        except Exception as e:
+            logger.error(f"Feed polling check error: {e}")
+            return False
     
-    # Service configuration
-    POLLING_INTERVAL: int = int(os.getenv("POLLING_INTERVAL", "120"))
-    BATCH_SIZE: int = int(os.getenv("BATCH_SIZE", "5"))
-    MAX_BATCH_WAIT: int = int(os.getenv("MAX_BATCH_WAIT", "30"))
-
-env = Environment() 
+    async def check_analysis_worker(self) -> bool:
+        try:
+            stuck_batches = self.redis_client.scard("articles_processing")
+            queue_size = self.redis_client.llen("articles_to_analyze")
+            
+            return stuck_batches == 0 and queue_size >= 0
+        except Exception as e:
+            logger.error(f"Analysis worker check error: {e}")
+            return False 
