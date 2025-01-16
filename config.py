@@ -44,7 +44,7 @@ class RedisConfig:
     batch_queue: str = "articles_to_analyze"
     processing_set: str = "articles_processing"
     batch_lock: str = "batch_lock"
-    batch_timeout: int = 60  # Seconds before considering a batch stuck
+    batch_timeout: int = 120  # Seconds before considering a batch stuck
 
 @dataclass
 class FeedConfig:
