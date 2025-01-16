@@ -41,22 +41,24 @@ def analyze_articles_batch(articles_data: List[Dict]) -> List[AnalysisData]:
     logger.info(f"Starting batch analysis for {len(articles_data)} articles")
     start_time = time.time()
 
-    # Load model and tokenizer once for the batch
-    logger.debug("Loading model and tokenizer")
-    model_name = ModalConfig.model_name
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float16,
-        device_map="auto"
-    )
-    logger.debug("Model loaded successfully")
-
     analyses = []
-    for article_data in articles_data:
-        logger.debug(f"Analyzing article: {article_data['id']}")
-        
-        prompt = f"""Analyze the following financial article and provide:
+    
+    try:
+        # Load model and tokenizer once for the batch
+        logger.debug("Loading model and tokenizer")
+        model_name = ModalConfig.model_name
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.float16,
+            device_map="auto"
+        )
+        logger.debug("Model loaded successfully")
+
+        for article_data in articles_data:
+            logger.debug(f"Analyzing article: {article_data['id']}")
+            
+            prompt = f"""Analyze the following financial article and provide:
 1. A brief summary
 2. Market impact assessment
 3. Potential trading ideas
@@ -67,65 +69,57 @@ Article: {article_data['content']}
 
 Analysis:"""
 
-        # Generate analysis
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-        outputs = model.generate(
-            **inputs,
-            max_length=1024,
-            temperature=0.7,
-            num_return_sequences=1
-        )
-        
-        response = tokenizer.decode(outputs[0], skip_special_tokens=True)
-        
-        # Parse response and create analysis
-        # This is a simplified parsing - you may want to improve this
-        try:
-            lines = response.split('\n')
-            summary = lines[0]
-            market_impact = lines[1] if len(lines) > 1 else ""
-            trading_ideas = [t.strip() for t in lines[2].split(',')] if len(lines) > 2 else []
-            key_assets = [a.strip() for a in lines[3].split(',')] if len(lines) > 3 else []
-            risk_assessment = lines[4].split(':') if len(lines) > 4 else ["Medium", "Unknown"]
-            logger.debug("Successfully parsed model output")
-        except Exception as e:
-            logger.error(f"Error parsing model output: {e}", exc_info=True)
-            summary = response[:200]
-            market_impact = "Unable to determine"
-            trading_ideas = []
-            key_assets = []
-            risk_assessment = ["Medium", "Analysis failed"]
-
-        processing_time = time.time() - start_time
-        logger.info(f"Analysis completed in {processing_time:.2f} seconds")
-
-        structured_analysis = StructuredAnalysis(
-            summary=summary,
-            market_impact=market_impact,
-            trading_ideas=trading_ideas,
-            key_assets=key_assets,
-            risk=RiskAssessment(
-                level=risk_assessment[0],
-                reason=risk_assessment[1]
+            # Generate analysis
+            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+            outputs = model.generate(
+                **inputs,
+                max_length=1024,
+                temperature=0.7,
+                num_return_sequences=1
             )
-        )
+            
+            response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+            
+            try:
+                lines = response.split('\n')
+                summary = lines[0]
+                market_impact = lines[1] if len(lines) > 1 else ""
+                trading_ideas = [t.strip() for t in lines[2].split(',')] if len(lines) > 2 else []
+                key_assets = [a.strip() for a in lines[3].split(',')] if len(lines) > 3 else []
+                risk_assessment = lines[4].split(':') if len(lines) > 4 else ["Medium", "Unknown"]
+                logger.debug("Successfully parsed model output")
+                
+                structured_analysis = StructuredAnalysis(
+                    summary=summary,
+                    market_impact=market_impact,
+                    trading_ideas=trading_ideas,
+                    key_assets=key_assets,
+                    risk=RiskAssessment(
+                        level=risk_assessment[0],
+                        reason=risk_assessment[1]
+                    )
+                )
 
-        analysis = AnalysisData(
-            structured_analysis=structured_analysis,
-            model=ModalConfig.model_name,
-            version=ModalConfig.model_version,
-            processing_time=processing_time
-        )
-        analyses.append(analysis)
+                analysis = AnalysisData(
+                    structured_analysis=structured_analysis,
+                    model=ModalConfig.model_name,
+                    version=ModalConfig.model_version,
+                    processing_time=time.time() - start_time
+                )
+                analyses.append(analysis)
+                
+            except Exception as e:
+                logger.error(f"Error parsing article {article_data['id']}: {e}", exc_info=True)
+                
     except Exception as e:
-        logger.error(f"Error analyzing article {article_data['id']}: {e}", exc_info=True)
+        logger.error(f"Error in batch processing: {e}", exc_info=True)
 
     total_time = time.time() - start_time
     logger.info(f"Batch analysis completed in {total_time:.2f} seconds")
     return analyses
 
 @stub.function(image=image)
-def analysis_worker(redis_config: RedisConfig):
+async def analysis_worker(redis_config: RedisConfig):
     """
     Worker that listens for new articles and processes them in batches
     """
@@ -166,7 +160,7 @@ def analysis_worker(redis_config: RedisConfig):
                     articles_data.append(json.loads(data))
             
             # Process batch
-            analyses = analyze_articles_batch.remote(articles_data)
+            analyses = await analyze_articles_batch.remote(articles_data)
             
             # Store results
             for article_id, analysis in zip(article_ids, analyses):
