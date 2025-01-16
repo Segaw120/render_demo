@@ -1,12 +1,18 @@
+import uuid
+import feedparser
 import redis
-from datetime import datetime, timedelta
-from config import RedisConfig
+import json
+from datetime import datetime
+from typing import Dict, Any
+import asyncio
 import logging
+from config import RedisConfig, FeedConfig, ArticleData, ArticleAnalysis
 
 logger = logging.getLogger(__name__)
 
-class HealthCheck:
-    def __init__(self, redis_config: RedisConfig):
+class RSSPoller:
+    def __init__(self, redis_config: RedisConfig, feed_config: FeedConfig):
+        logger.info("Initializing RSS Poller")
         self.redis_client = redis.Redis(
             host=redis_config.host,
             port=redis_config.port,
@@ -14,32 +20,64 @@ class HealthCheck:
             db=redis_config.db,
             decode_responses=True
         )
-    
-    async def check_redis_connection(self) -> bool:
+        logger.info(f"Connected to Redis at {redis_config.host}:{redis_config.port}")
+        self.feed_urls = feed_config.urls
+        self.polling_interval = feed_config.polling_interval
+        logger.info(f"Configured with {len(feed_config.urls)} feeds, polling every {feed_config.polling_interval} seconds")
+
+    async def save_article(self, article: ArticleData):
+        """Save article to Redis in the required format"""
+        logger.debug(f"Saving article: {article.title} (ID: {article.id})")
+        article_analysis = ArticleAnalysis(article=article)
+        
         try:
-            return self.redis_client.ping()
+            # Store as JSON string
+            self.redis_client.set(
+                self.redis_config.article_key.format(article.id),
+                json.dumps(article_analysis.__dict__, default=vars)
+            )
+            # Add to processing queue
+            self.redis_client.lpush(
+                self.redis_config.batch_queue,
+                article.id
+            )
+            logger.info(f"Successfully saved article {article.id} to Redis")
         except Exception as e:
-            logger.error(f"Redis connection error: {e}")
-            return False
-    
-    async def check_feed_polling(self) -> bool:
-        try:
-            last_poll = self.redis_client.get("last_poll_timestamp")
-            if not last_poll:
-                return False
+            logger.error(f"Failed to save article {article.id}: {str(e)}")
+            raise
+
+    async def poll_feeds(self):
+        logger.info("Starting RSS feed polling")
+        while True:
+            for url in self.feed_urls:
+                logger.info(f"Polling feed: {url}")
+                try:
+                    feed = feedparser.parse(url)
+                    logger.debug(f"Found {len(feed.entries)} entries in feed {url}")
+                    
+                    for entry in feed.entries:
+                        logger.debug(f"Processing entry: {entry.title}")
+                        article = ArticleData(
+                            id=str(uuid.uuid4()),
+                            title=entry.title,
+                            content=entry.get('content', entry.get('summary', '')),
+                            source=url,
+                            url=entry.link,
+                            timestamp=entry.get('published', datetime.now().isoformat())
+                        )
+                        
+                        # Save article using new format
+                        await self.save_article(article)
+
+                        # Publish to analysis queue
+                        self.redis_client.publish(
+                            'articles_to_analyze',
+                            article.id
+                        )
+                        logger.info(f"Published article {article.id} for analysis")
+
+                except Exception as e:
+                    logger.error(f"Error polling feed {url}: {str(e)}", exc_info=True)
             
-            last_poll_time = datetime.fromisoformat(last_poll)
-            return datetime.now() - last_poll_time < timedelta(minutes=5)
-        except Exception as e:
-            logger.error(f"Feed polling check error: {e}")
-            return False
-    
-    async def check_analysis_worker(self) -> bool:
-        try:
-            stuck_batches = self.redis_client.scard("articles_processing")
-            queue_size = self.redis_client.llen("articles_to_analyze")
-            
-            return stuck_batches == 0 and queue_size >= 0
-        except Exception as e:
-            logger.error(f"Analysis worker check error: {e}")
-            return False 
+            logger.debug(f"Sleeping for {self.polling_interval} seconds")
+            await asyncio.sleep(self.polling_interval)
