@@ -1,56 +1,35 @@
-import logging.config
-import structlog
-from pythonjsonlogger import jsonlogger
+import re
+from typing import Optional
+import logging
 
-def setup_logging(env: str = "development"):
-    """Configure structured logging"""
-    
-    # Configure structlog
-    structlog.configure(
-        processors=[
-            structlog.contextvars.merge_contextvars,
-            structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
-            structlog.processors.JSONRenderer()
-        ],
-        logger_factory=structlog.PrintLoggerFactory(),
-        wrapper_class=structlog.make_filtering_bound_logger(logging.INFO),
-        cache_logger_on_first_use=True,
-    )
+logger = logging.getLogger(__name__)
 
-    # Configure standard logging
-    logging_config = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "json": {
-                "()": jsonlogger.JsonFormatter,
-                "fmt": "%(asctime)s %(name)s %(levelname)s %(message)s"
-            }
-        },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "json",
-                "stream": "ext://sys.stdout"
-            },
-            "file": {
-                "class": "logging.handlers.RotatingFileHandler",
-                "formatter": "json",
-                "filename": "app.log",
-                "maxBytes": 10485760,  # 10MB
-                "backupCount": 5
-            }
-        },
-        "loggers": {
-            "": {
-                "handlers": ["console", "file"],
-                "level": "INFO" if env == "production" else "DEBUG",
-                "propagate": True
-            }
-        }
-    }
+class TokenValidator:
+    @staticmethod
+    def validate_modal_token(token_id: Optional[str], token_secret: Optional[str]) -> bool:
+        """Validate Modal token format"""
+        if not token_id or not token_secret:
+            return False
+            
+        # Modal token format validation
+        token_id_pattern = r'^ak-[a-zA-Z0-9]{16}$'
+        token_secret_pattern = r'^as-[a-zA-Z0-9]{16}$'
+        return (
+            bool(re.match(token_id_pattern, token_id)) and
+            bool(re.match(token_secret_pattern, token_secret))
+        )
     
-    logging.config.dictConfig(logging_config) 
+    @staticmethod
+    def validate_render_token(api_key: Optional[str], service_id: Optional[str]) -> bool:
+        """Validate Render token format"""
+        if not api_key or not service_id:
+            return False
+            
+        # Render API key format validation
+        api_key_pattern = r'^rnd_[a-zA-Z0-9]{32}$'
+        service_id_pattern = r'^srv-[a-zA-Z0-9]{16}$'
+        
+        return (
+            bool(re.match(api_key_pattern, api_key)) and
+            bool(re.match(service_id_pattern, service_id))
+        ) 
